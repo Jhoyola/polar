@@ -15,6 +15,7 @@ export interface BitcoindNodeMapping {
 export interface BitcoindNodeModel {
   chainInfo?: ChainInfo;
   walletInfo?: WalletInfo;
+  mineIntervalId?: NodeJS.Timer;
 }
 
 export interface BitcoindModel {
@@ -25,10 +26,20 @@ export interface BitcoindModel {
     BitcoindModel,
     { node: BitcoinNode; chainInfo: ChainInfo; walletInfo: WalletInfo }
   >;
+  setMineInterval: Action<
+    BitcoindModel,
+    { node: BitcoinNode; mineIntervalId?: NodeJS.Timer }
+  >;
   getInfo: Thunk<BitcoindModel, BitcoinNode, StoreInjections>;
   mine: Thunk<
     BitcoindModel,
     { blocks: number; node: BitcoinNode },
+    StoreInjections,
+    RootModel
+  >;
+  intervalMine: Thunk<
+    BitcoindModel,
+    { intervalMin: number; node: BitcoinNode },
     StoreInjections,
     RootModel
   >;
@@ -56,6 +67,9 @@ const bitcoindModel: BitcoindModel = {
     state.nodes[node.name].chainInfo = chainInfo;
     state.nodes[node.name].walletInfo = walletInfo;
   }),
+  setMineInterval: action((state, { node, mineIntervalId }) => {
+    state.nodes[node.name].mineIntervalId = mineIntervalId;
+  }),
   getInfo: thunk(async (actions, node, { injections }) => {
     const chainInfo = await injections.bitcoindService.getBlockchainInfo(node);
     const walletInfo = await injections.bitcoindService.getWalletInfo(node);
@@ -73,6 +87,37 @@ const bitcoindModel: BitcoindModel = {
       network.nodes.bitcoin.filter(n => n.status === Status.Started).map(actions.getInfo),
     );
   }),
+  intervalMine: thunk(
+    async (actions, { intervalMin, node }, { injections, getStoreState }) => {
+      // clear the interval
+      const oldIntervalId = getStoreState().bitcoind.nodes[node.name].mineIntervalId;
+      if (oldIntervalId) {
+        clearInterval(oldIntervalId);
+        actions.setMineInterval({ node });
+      }
+
+      // don't mine if mining stopped
+      if (intervalMin == 0) {
+        return;
+      }
+
+      const mineIntervalId = setInterval(async () => {
+        await injections.bitcoindService.mine(1, node);
+        // add a small delay to allow the block to propagate to all nodes
+        await delay(500);
+        // update info for all bitcoin nodes
+        const network = getStoreState().network.networkById(node.networkId);
+        await Promise.all(
+          network.nodes.bitcoin
+            .filter(n => n.status === Status.Started)
+            .map(actions.getInfo),
+        );
+      }, intervalMin * 60 * 1000);
+
+      // save the interval variable
+      actions.setMineInterval({ node, mineIntervalId });
+    },
+  ),
   sendFunds: thunk(
     async (actions, { node, toAddress, amount, autoMine }, { injections }) => {
       const txid = await injections.bitcoindService.sendFunds(node, toAddress, amount);

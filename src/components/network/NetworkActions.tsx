@@ -1,4 +1,4 @@
-import React, { ReactNode, useCallback } from 'react';
+import React, { ReactNode, useCallback, useState } from 'react';
 import { useAsyncCallback } from 'react-async-hook';
 import {
   CloseOutlined,
@@ -6,12 +6,22 @@ import {
   FormOutlined,
   MoreOutlined,
   PlayCircleOutlined,
+  RetweetOutlined,
   StopOutlined,
   ToolOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import styled from '@emotion/styled';
-import { Button, Divider, Dropdown, MenuProps, Tag } from 'antd';
+import {
+  Button,
+  Divider,
+  Dropdown,
+  MenuProps,
+  Tag,
+  InputNumber,
+  Tooltip,
+  Space,
+} from 'antd';
 import { ButtonType } from 'antd/lib/button';
 import { usePrefixedTranslation } from 'hooks';
 import { Status } from 'shared/types';
@@ -25,6 +35,15 @@ const Styled = {
   `,
   Dropdown: styled(Dropdown)`
     margin-left: 12px;
+  `,
+  InputNumber: styled(InputNumber)`
+    width: 60px;
+  `,
+  AutoMineGroup: styled(Space.Compact)`
+    margin-right: 12px;
+  `,
+  Labels: styled(Space.Compact)`
+    vertical-align: middle;
   `,
 };
 
@@ -90,7 +109,7 @@ const NetworkActions: React.FC<Props> = ({
 
   const nodeState = useStoreState(s => s.bitcoind.nodes[bitcoinNode.name]);
   const { notify } = useStoreActions(s => s.app);
-  const { mine } = useStoreActions(s => s.bitcoind);
+  const { mine, intervalMine } = useStoreActions(s => s.bitcoind);
   const mineAsync = useAsyncCallback(async () => {
     try {
       await mine({ blocks: 1, node: bitcoinNode });
@@ -98,6 +117,24 @@ const NetworkActions: React.FC<Props> = ({
       notify({ message: l('mineError'), error });
     }
   });
+  const startIntervalMineAsync = useAsyncCallback(async () => {
+    try {
+      if (!mineIntervalMin) {
+        throw new Error(l('mineIntervalNotSetError'));
+      }
+      await intervalMine({ intervalMin: mineIntervalMin, node: bitcoinNode });
+    } catch (error: any) {
+      notify({ message: l('mineError'), error });
+    }
+  });
+  const stopIntervalMineAsync = useAsyncCallback(async () => {
+    try {
+      intervalMine({ intervalMin: 0, node: bitcoinNode });
+    } catch (error: any) {
+      notify({ message: l('mineError'), error });
+    }
+  });
+  const [mineIntervalMin, setMineIntervalMin] = useState(10);
 
   const handleClick: MenuProps['onClick'] = useCallback(info => {
     switch (info.key) {
@@ -123,14 +160,61 @@ const NetworkActions: React.FC<Props> = ({
     <>
       {bitcoinNode.status === Status.Started && nodeState && nodeState.chainInfo && (
         <>
-          <Tag>height: {nodeState.chainInfo.blocks}</Tag>
-          <Button
-            onClick={mineAsync.execute}
-            loading={mineAsync.loading}
-            icon={<ToolOutlined />}
-          >
-            {l('mineBtn')}
-          </Button>
+          <Styled.Labels direction="vertical">
+            <Tag>
+              {l('blockHeight')}: {nodeState.chainInfo.blocks}
+            </Tag>
+            {nodeState.mineIntervalId && (
+              <Tag color={'green'}>
+                {l('mining')}: {l('active')} ({mineIntervalMin} min)
+              </Tag>
+            )}
+            {!nodeState.mineIntervalId && (
+              <Tag color={'red'}>
+                {l('mining')}: {l('inactive')}
+              </Tag>
+            )}
+          </Styled.Labels>
+
+          <Styled.AutoMineGroup>
+            {!nodeState.mineIntervalId && (
+              <>
+                <Styled.Button
+                  onClick={startIntervalMineAsync.execute}
+                  icon={<RetweetOutlined />}
+                >
+                  Auto Mine
+                </Styled.Button>
+                <Tooltip title={<span>{l('blocktimeAutoMine')}</span>}>
+                  <Styled.InputNumber
+                    value={mineIntervalMin}
+                    max="999"
+                    min="1"
+                    parser={i => parseInt(`${i}`.replace(/(undefined|,*)/g, ''))}
+                    onChange={i => setMineIntervalMin(i as number)}
+                  />
+                </Tooltip>
+              </>
+            )}
+            {nodeState.mineIntervalId && (
+              <Styled.Button
+                onClick={stopIntervalMineAsync.execute}
+                icon={<StopOutlined />}
+              >
+                {l('stopAutoMine')}
+              </Styled.Button>
+            )}
+          </Styled.AutoMineGroup>
+
+          <Tooltip title={<span>{l('mineOneBlock')}</span>}>
+            <Button
+              onClick={mineAsync.execute}
+              loading={mineAsync.loading}
+              icon={<ToolOutlined />}
+            >
+              {l('mineBtn')}
+            </Button>
+          </Tooltip>
           <SyncButton network={network} />
           <Divider type="vertical" />
         </>
