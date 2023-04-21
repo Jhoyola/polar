@@ -87,37 +87,27 @@ const bitcoindModel: BitcoindModel = {
       network.nodes.bitcoin.filter(n => n.status === Status.Started).map(actions.getInfo),
     );
   }),
-  intervalMine: thunk(
-    async (actions, { intervalMin, node }, { injections, getStoreState }) => {
-      // clear the interval
-      const oldIntervalId = getStoreState().bitcoind.nodes[node.name].mineIntervalId;
-      if (oldIntervalId) {
-        clearInterval(oldIntervalId);
-        actions.setMineInterval({ node });
-      }
+  intervalMine: thunk(async (actions, { intervalMin, node }, { getStoreState }) => {
+    // clear the interval
+    const oldIntervalId = getStoreState().bitcoind.nodes[node.name].mineIntervalId;
+    if (oldIntervalId) {
+      clearInterval(oldIntervalId);
+      actions.setMineInterval({ node });
+    }
 
-      // don't mine if mining stopped
-      if (intervalMin == 0) {
-        return;
-      }
+    // don't mine if mining stopped
+    if (intervalMin == 0) {
+      return;
+    }
 
-      const mineIntervalId = setInterval(async () => {
-        await injections.bitcoindService.mine(1, node);
-        // add a small delay to allow the block to propagate to all nodes
-        await delay(500);
-        // update info for all bitcoin nodes
-        const network = getStoreState().network.networkById(node.networkId);
-        await Promise.all(
-          network.nodes.bitcoin
-            .filter(n => n.status === Status.Started)
-            .map(actions.getInfo),
-        );
-      }, intervalMin * 60 * 1000);
+    const blocks = 1;
+    const mineIntervalId = setInterval(async () => {
+      await actions.mine({ blocks, node });
+    }, intervalMin * 60 * 1000);
 
-      // save the interval variable
-      actions.setMineInterval({ node, mineIntervalId });
-    },
-  ),
+    // save the interval variable
+    actions.setMineInterval({ node, mineIntervalId });
+  }),
   sendFunds: thunk(
     async (actions, { node, toAddress, amount, autoMine }, { injections }) => {
       const txid = await injections.bitcoindService.sendFunds(node, toAddress, amount);
